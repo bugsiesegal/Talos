@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from logging_functions import calculate_perplexity, calculate_accuracy, calculate_f1
+
 
 class TextEncoderModule(nn.Module):
     """
@@ -104,6 +106,7 @@ class CognitiveModule(nn.Module):
     brain_size : int
         The dimension of the input and output vectors
     """
+
     def __init__(self, brain_size: int = 512, num_heads: int = 8,
                  dim_feedforward: int = 2048, encoder_layers: int = 6, decoder_layers: int = 6,
                  dropout: float = 0.1):
@@ -137,6 +140,7 @@ class OutPipingModule(nn.Module):
     brain_size : int
         The dimension of the input and output vectors
     """
+
     def __init__(self, brain_size: int = 512):
         super().__init__()
         self.fc = nn.Linear(brain_size, brain_size)
@@ -171,6 +175,7 @@ class TextDecoderModule(nn.Module):
     dropout : float
         The dropout probability
     """
+
     def __init__(self, brain_size: int, vocab_size: int, num_layers: int = 6,
                  num_heads: int = 8, dim_feedforward: int = 2048, dropout: float = 0.1):
         super().__init__()
@@ -245,53 +250,3 @@ class IntegratedMemoryNeuralNetwork(nn.Module):
 
     def reset_state(self):
         self.brain_state = torch.zeros(1, self.brain_state.shape[1], device=self.brain_state.device)
-
-
-class PLIntegratedMemoryNeuralNetwork(pl.LightningModule):
-    def __init__(self, vocab_size, brain_size, embedding_dim, num_heads, num_layers, dim_feedforward, dropout, learning_rate, context_length):
-        super().__init__()
-        self.model = IntegratedMemoryNeuralNetwork(vocab_size, brain_size, embedding_dim, num_heads, num_layers, dim_feedforward, dropout)
-        self.learning_rate = learning_rate
-        self.context_length = context_length
-        self.criterion = torch.nn.CrossEntropyLoss()
-
-    def forward(self, x):
-        return self.model(x)
-
-    def training_step(self, batch, batch_idx):
-        total_loss = 0
-        num_steps = 0
-        for i in range(1, len(batch['input_ids'])):
-            start_idx = max(0, i - self.context_length)
-            inputs = torch.vstack(batch['input_ids'][start_idx:i]).T
-            targets = batch['input_ids'][i]
-            outputs = self(inputs)
-            loss = self.criterion(outputs, targets)
-            total_loss += loss
-            num_steps += 1
-            self.log('step_loss', loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
-        avg_loss = total_loss / num_steps
-        self.log('avg_train_loss', avg_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.model.reset_state()
-        return avg_loss
-
-    def validation_step(self, batch, batch_idx):
-        total_val_loss = 0
-        num_steps = 0
-        for i in range(1, len(batch['input_ids'])):
-            start_idx = max(0, i - self.context_length)
-            inputs = torch.vstack(batch['input_ids'][start_idx:i]).T
-            targets = batch['input_ids'][i]
-            outputs = self(inputs)
-            val_loss = self.criterion(outputs, targets)
-            if not torch.isnan(val_loss):
-                total_val_loss += val_loss
-                num_steps += 1
-        avg_val_loss = total_val_loss / num_steps if num_steps > 0 else torch.tensor(0.0)
-        self.log('avg_val_loss', avg_val_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-
-    def on_train_epoch_end(self):
-        self.model.reset_state()
