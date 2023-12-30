@@ -1,252 +1,321 @@
+from abc import ABC, abstractmethod
+
 import lightning as pl
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
-
-from logging_functions import calculate_perplexity, calculate_accuracy, calculate_f1
+import torch.nn.functional as F
 
 
-class TextEncoderModule(nn.Module):
-    """
-    Text encoder model
+class InputModule(ABC, nn.Module):
+    def __init__(self, memory_state_size):
+        super(InputModule, self).__init__()
+        self.memory_state_size = memory_state_size
 
-    This model takes in a sequence of tokens and outputs a vector representation of the sequence.
-
-    Parameters
-    ----------
-    embedding_dim : int
-        The dimension of the embedding layer
-    vocab_size : int
-        The size of the vocabulary
-    num_heads : int
-        The number of heads in the multi-head attention layer
-    num_layers : int
-        The number of layers in the transformer
-    dim_feedforward : int
-        The dimension of the feedforward layer in the transformer
-    dropout : float
-        The dropout probability
-    brain_size : int
-        The dimension of the output vector
-    """
-
-    def __init__(self, embedding_dim: int, vocab_size: int,
-                 num_heads: int = 8, num_layers: int = 12,
-                 dim_feedforward: int = 2048,
-                 dropout: float = 0.1, brain_size: int = 512):
-        super().__init__()
-
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.transformer_layer = nn.TransformerEncoderLayer(d_model=embedding_dim, nhead=num_heads, dropout=dropout,
-                                                            dim_feedforward=dim_feedforward,
-                                                            batch_first=True)
-        self.transformer = nn.TransformerEncoder(self.transformer_layer, num_layers=num_layers)
-
-        self.fc = nn.Linear(embedding_dim, brain_size)
-
-    def forward(self, x):
-        x = self.embedding(x)
-        x = self.transformer(x)
-        x = self.fc(x)
-        return x
-
-    def to(self, device):
-        self.embedding = self.embedding.to(device)
-        self.transformer_layer = self.transformer_layer.to(device)
-        self.transformer = self.transformer.to(device)
-        self.fc = self.fc.to(device)
-        return super().to(device)
+    @abstractmethod
+    def forward(self, input_data):
+        pass
 
 
-class InPipingModule(nn.Module):
-    """
-    In-piping model
+class OutputModule(ABC, nn.Module):
+    def __init__(self, memory_state_size):
+        super(OutputModule, self).__init__()
+        self.memory_state_size = memory_state_size
 
-    This model takes in a vector representation and a brain state vector and outputs a new brain state vector.
+    @abstractmethod
+    def forward(self, memory_state):
+        pass
 
-    Parameters
-    ----------
-    brain_size : int
-        The dimension of the input and output vectors
-    pooling : str
-        The pooling method to use. Either 'max' or 'avg'
-    """
 
-    def __init__(self, brain_size: int = 512, pooling: str = 'max'):
-        super().__init__()
-        self.fc = nn.Linear(brain_size, brain_size)
+class PipeInModule(nn.Module):
+    def __init__(self, brain_state_size, memory_state_size):
+        super(PipeInModule, self).__init__()
 
-        if pooling == 'max':
-            self.pooling = nn.AdaptiveMaxPool1d(1)
-        elif pooling == 'avg':
-            self.pooling = nn.AdaptiveAvgPool1d(1)
-        else:
-            raise ValueError(f'Pooling {pooling} not supported')
+        # Parameters
+        self.brain_state_size = brain_state_size
+        self.memory_state_size = memory_state_size
 
-    def forward(self, x, brain_state):
-        x = self.fc(x)
-        x = self.pooling(x.permute(0, 2, 1)).squeeze(2)
-        x = x + brain_state
-        return x
+        # Layers
+        self.fc1 = nn.Linear(memory_state_size, brain_state_size)
 
-    def to(self, device):
-        self.fc = self.fc.to(device)
-        self.pooling = self.pooling.to(device)
-        return super().to(device)
+    def forward(self, memory_state, brain_state):
+        return brain_state + torch.mean(self.fc1(memory_state), axis=1)
+
+
+class PipeOutModule(nn.Module):
+    def __init__(self, brain_state_size, memory_state_size):
+        super(PipeOutModule, self).__init__()
+
+        # Parameters
+        self.brain_state_size = brain_state_size
+        self.memory_state_size = memory_state_size
+
+        # Layers
+        self.fc1 = nn.Linear(brain_state_size, memory_state_size)
+
+    def forward(self, brain_state):
+        return self.fc1(brain_state)
 
 
 class CognitiveModule(nn.Module):
-    """
-    Cognitive model
+    def __init__(self, brain_state_size, num_layers=3, num_heads=8, dim_feedforward=2048, dropout=0.1):
+        super(CognitiveModule, self).__init__()
 
-    This model takes in a brain state vector and outputs a new brain state vector.
+        # Parameters
+        self.brain_state_size = brain_state_size
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.dim_feedforward = dim_feedforward
+        self.dropout = dropout
 
-    Parameters
-    ----------
-    brain_size : int
-        The dimension of the input and output vectors
-    """
+        # Transformer Layer
+        self.transformer_layer = nn.TransformerEncoderLayer(
+            d_model=brain_state_size,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation='relu',
+            bias=False
+        )
 
-    def __init__(self, brain_size: int = 512, num_heads: int = 8,
-                 dim_feedforward: int = 2048, encoder_layers: int = 6, decoder_layers: int = 6,
-                 dropout: float = 0.1):
-        super().__init__()
+        # Transformer
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer=self.transformer_layer,
+            num_layers=num_layers,
+        )
 
-        self.transformer = nn.Transformer(d_model=brain_size, nhead=num_heads, dropout=dropout,
-                                          num_encoder_layers=encoder_layers, num_decoder_layers=decoder_layers,
-                                          dim_feedforward=dim_feedforward, batch_first=True)
-
-        self.fc = nn.Linear(brain_size, brain_size)
-
-    def forward(self, x):
-        x = self.transformer(x, x)
-        x = self.fc(x)
-        return x
-
-    def to(self, device):
-        self.transformer = self.transformer.to(device)
-        self.fc = self.fc.to(device)
-        return super().to(device)
+    def forward(self, brain_state):
+        return self.transformer(brain_state)
 
 
-class OutPipingModule(nn.Module):
-    """
-    Out-piping model
+class TextInputModule(InputModule):
+    def __init__(
+            self,
+            memory_state_size,
+            vocab_size,
+            num_heads=8,
+            dim_feedforward=2048,
+            num_layers=16,
+            dropout=0.1,
+            bias=True,
+    ):
+        super(TextInputModule, self).__init__(memory_state_size)
 
-    This model takes in a brain state vector and outputs a vector representation.
+        # Embedding
+        self.embedding = nn.Embedding(vocab_size, memory_state_size)
 
-    Parameters
-    ----------
-    brain_size : int
-        The dimension of the input and output vectors
-    """
+        # Transformer Layer
+        self.transformer_layer = nn.TransformerDecoderLayer(
+            d_model=memory_state_size,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            bias=bias,
+        )
 
-    def __init__(self, brain_size: int = 512):
-        super().__init__()
-        self.fc = nn.Linear(brain_size, brain_size)
+        # Transformer
+        self.transformer = nn.TransformerDecoder(
+            decoder_layer=self.transformer_layer,
+            num_layers=num_layers,
+        )
 
-    def forward(self, x):
-        x = self.fc(x)
-        return x
+    def forward(self, input_data: torch.Tensor) -> torch.Tensor:
+        # Embedding
+        embedded_input = self.embedding(input_data)
 
-    def to(self, device):
-        self.fc = self.fc.to(device)
-        return super().to(device)
+        # Generate mask
+        tgt_mask = torch.nn.Transformer.generate_square_subsequent_mask(embedded_input.size(0)).to(
+            embedded_input.device)
 
-
-class TextDecoderModule(nn.Module):
-    """
-    Text decoder model
-
-    This model takes in a vector representation and outputs a sequence of tokens.
-
-    Parameters
-    ----------
-    brain_size : int
-        The dimension of the input and output vectors
-    vocab_size : int
-        The size of the vocabulary
-    num_layers : int
-        The number of layers in the transformer
-    num_heads : int
-        The number of heads in the multi-head attention layer
-    dim_feedforward : int
-        The dimension of the feedforward layer in the transformer
-    dropout : float
-        The dropout probability
-    """
-
-    def __init__(self, brain_size: int, vocab_size: int, num_layers: int = 6,
-                 num_heads: int = 8, dim_feedforward: int = 2048, dropout: float = 0.1):
-        super().__init__()
-
-        # Transformer Decoder Layer
-        self.transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=brain_size, nhead=num_heads,
-                                                                    dim_feedforward=dim_feedforward, dropout=dropout)
-        self.transformer_decoder = nn.TransformerDecoder(self.transformer_decoder_layer, num_layers=num_layers)
-
-        # Linear layer to map to vocabulary
-        self.fc = nn.Linear(brain_size, vocab_size)
-
-    def forward(self, x):
-        x = self.transformer_decoder(x, x)
-        x = self.fc(x)
-        return F.log_softmax(x, dim=-1)
-
-    def to(self, device):
-        self.transformer_decoder_layer = self.transformer_decoder_layer.to(device)
-        self.transformer_decoder = self.transformer_decoder.to(device)
-        self.fc = self.fc.to(device)
-        return super().to(device)
+        # Transformer
+        return self.transformer(embedded_input, torch.zeros_like(embedded_input), tgt_mask=tgt_mask)
 
 
-class IntegratedMemoryNeuralNetwork(nn.Module):
-    def __init__(self, vocab_size: int, brain_size: int = 512, embedding_dim: int = 256,
-                 num_heads: int = 8, num_layers: int = 6, dim_feedforward: int = 2048,
-                 dropout: float = 0.1, pooling: str = 'max'):
-        super().__init__()
+class TextOutputModule(OutputModule):
+    def __init__(
+            self,
+            memory_state_size,
+            vocab_size,
+            num_heads=8,
+            dim_feedforward=2048,
+            num_layers=16,
+            dropout=0.1,
+            bias=True,
+    ):
+        super(TextOutputModule, self).__init__(memory_state_size)
 
-        # Initializing the modules
-        self.text_encoder = TextEncoderModule(embedding_dim, vocab_size, num_heads, 2,
-                                              dim_feedforward, dropout, brain_size)
-        self.in_piping = InPipingModule(brain_size, pooling)
-        self.cognitive = CognitiveModule(brain_size, num_heads, dim_feedforward, num_layers, num_layers, dropout)
-        self.out_piping = OutPipingModule(brain_size)
-        self.text_decoder = TextDecoderModule(brain_size, vocab_size, 2, num_heads,
-                                              dim_feedforward, dropout)
+        # Transformer Layer
+        self.transformer_layer = nn.TransformerDecoderLayer(
+            d_model=memory_state_size,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            bias=bias,
+        )
 
-        # Initializing the brain state
-        self.brain_state = torch.zeros(1, brain_size)
+        # Transformer
+        self.transformer = nn.TransformerDecoder(
+            decoder_layer=self.transformer_layer,
+            num_layers=num_layers,
+        )
 
-    def forward(self, x):
-        if x.shape[0] != self.brain_state.shape[0]:
-            self.brain_state = torch.zeros(x.shape[0], self.brain_state.shape[1], device=x.device)
+        # Linear
+        self.linear = nn.Linear(memory_state_size, vocab_size)
 
-        # Text encoding
-        encoded_text = self.text_encoder(x)
+    def forward(self, memory_state: torch.Tensor) -> torch.Tensor:
+        # Generate mask
+        tgt_mask = torch.nn.Transformer.generate_square_subsequent_mask(memory_state.size(0)).to(memory_state.device)
 
-        # In-piping: updating the brain state
-        self.brain_state = self.in_piping(encoded_text, self.brain_state)
+        # Transformer
+        transformer_output = self.transformer(memory_state, torch.zeros_like(memory_state), tgt_mask=tgt_mask)
 
-        # Cognitive processing
-        cognitive_output = self.cognitive(self.brain_state)
+        # Linear
+        return self.linear(transformer_output)
 
-        # Out-piping
-        piped_output = self.out_piping(cognitive_output)
 
-        # Text decoding
-        decoded_text = self.text_decoder(piped_output)
+class IntegratedMemoryModel(nn.Module):
+    def __init__(
+            self,
+            brain_state_size,
+            memory_state_size,
+            thinking_iterations=3,
+            cognitive_num_heads=8,
+            cognitive_dim_feedforward=2048,
+            cognitive_num_layers=16,
+            cognitive_dropout=0.1,
+    ):
+        super(IntegratedMemoryModel, self).__init__()
 
-        return decoded_text
+        # Parameters
+        self.brain_state_size = brain_state_size
+        self.memory_state_size = memory_state_size
+        self.thinking_iterations = thinking_iterations
 
-    def to(self, device):
-        self.text_encoder = self.text_encoder.to(device)
-        self.in_piping = self.in_piping.to(device)
-        self.cognitive = self.cognitive.to(device)
-        self.out_piping = self.out_piping.to(device)
-        self.text_decoder = self.text_decoder.to(device)
-        self.brain_state = self.brain_state.to(device)
-        return super().to(device)
+        # Define brain state
+        self.brain_state = nn.Parameter(torch.zeros(1, brain_state_size))
+        self.brain_state.requires_grad = False
 
-    def reset_state(self):
-        self.brain_state = torch.zeros(1, self.brain_state.shape[1], device=self.brain_state.device)
+        # Input Modules
+        self.input_modules = nn.ModuleDict()
+
+        # Output Modules
+        self.output_modules = nn.ModuleDict()
+
+        # Core Modules
+        self.pipe_in_module = PipeInModule(brain_state_size, memory_state_size)
+        self.pipe_out_module = PipeOutModule(brain_state_size, memory_state_size)
+        self.cognitive_module = CognitiveModule(brain_state_size, cognitive_num_layers, cognitive_num_heads,
+                                                cognitive_dim_feedforward, cognitive_dropout)
+
+    def reset_brain_state(self, device="cuda") -> None:
+        self.brain_state.data = torch.zeros(1, self.brain_state_size, device=device)
+
+    def forward(self, input_data: dict) -> dict:
+        # Memory Dict
+        memory_data = {}
+
+        # Input loop
+        for key, input_module in self.input_modules.items():
+            memory_data[key] = input_module(input_data[key])
+
+        # Pipe in
+        for memory in memory_data.values():
+            self.brain_state.data = self.pipe_in_module(memory, self.brain_state)
+
+        # Cognitive
+        for _ in range(self.thinking_iterations):
+            self.brain_state.data = self.cognitive_module(self.brain_state)
+
+        # Output Dict
+        output_dict = {}
+
+        # Output loop
+        for key, output_module in self.output_modules.items():
+            output_dict[key] = output_module(self.pipe_out_module(self.brain_state))
+
+        # Return
+        return output_dict
+
+    def add_input_module(self, name: str, module: InputModule) -> None:
+        if name in self.input_modules:
+            raise ValueError(f"Input module with name {name} already exists.")
+
+        self.input_modules[name] = module
+
+    def add_output_module(self, name: str, module: OutputModule) -> None:
+        if name in self.output_modules:
+            raise ValueError(f"Output module with name {name} already exists.")
+
+        self.output_modules[name] = module
+
+    def get_brain_state(self) -> torch.Tensor:
+        return self.brain_state
+
+
+class IntegratedMemoryModelLightning(pl.LightningModule):
+    def __init__(
+            self,
+            model: IntegratedMemoryModel,
+            learning_rate: float = 1e-3,
+    ):
+        super(IntegratedMemoryModelLightning, self).__init__()
+
+        # Model
+        self.model = model
+
+        # Learning rate
+        self.learning_rate = learning_rate
+
+    def forward(self, input_data: dict) -> dict:
+        return self.model(input_data)
+
+    def training_step(self, batch, batch_idx):
+        self.model.reset_brain_state()
+        total_loss = 0.0
+
+        for minibatch in batch:
+            output = self.model(minibatch["text_input"])
+            loss = F.cross_entropy(output['text_output'], minibatch["labels"])
+            total_loss += loss
+
+        avg_loss = total_loss / len(batch)
+        perplexity = torch.exp(avg_loss)
+        self.log('Loss', avg_loss, on_step=True, on_epoch=False)
+        self.log('Perplexity', perplexity, on_step=True, on_epoch=False)
+
+        return avg_loss
+
+    def validation_step(self, batch, batch_idx):
+        self.model.reset_brain_state()
+        total_loss = 0.0
+
+        for minibatch in batch:
+            output = self.model({"text_input":minibatch["inputs"].squeeze(0)})
+            loss = F.cross_entropy(output['text_output'], minibatch["labels"].squeeze(0))
+            total_loss += loss
+
+        avg_loss = total_loss / len(batch)
+        perplexity = torch.exp(avg_loss)
+        self.log('Val_Loss', avg_loss, on_step=True, on_epoch=False)
+        self.log('Val_Perplexity', perplexity, on_step=True, on_epoch=False)
+
+        return avg_loss
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=None):
+        # Get data
+        input_data, target_data = batch
+
+        # Run model
+        output = self(input_data)
+
+        return output
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+
+    def get_brain_state(self) -> torch.Tensor:
+        return self.model.get_brain_state()
+
+    def reset_brain_state(self, device="cuda") -> None:
+        self.model.reset_brain_state(device)
