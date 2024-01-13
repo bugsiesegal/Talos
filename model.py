@@ -1,321 +1,277 @@
-from abc import ABC, abstractmethod
-
-import lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class InputModule(ABC, nn.Module):
-    def __init__(self, memory_state_size):
-        super(InputModule, self).__init__()
-        self.memory_state_size = memory_state_size
-
-    @abstractmethod
-    def forward(self, input_data):
-        pass
-
-
-class OutputModule(ABC, nn.Module):
-    def __init__(self, memory_state_size):
-        super(OutputModule, self).__init__()
-        self.memory_state_size = memory_state_size
-
-    @abstractmethod
-    def forward(self, memory_state):
-        pass
-
-
-class PipeInModule(nn.Module):
-    def __init__(self, brain_state_size, memory_state_size):
-        super(PipeInModule, self).__init__()
-
-        # Parameters
-        self.brain_state_size = brain_state_size
-        self.memory_state_size = memory_state_size
-
-        # Layers
-        self.fc1 = nn.Linear(memory_state_size, brain_state_size)
-
-    def forward(self, memory_state, brain_state):
-        return brain_state + torch.mean(self.fc1(memory_state), axis=1)
-
-
-class PipeOutModule(nn.Module):
-    def __init__(self, brain_state_size, memory_state_size):
-        super(PipeOutModule, self).__init__()
-
-        # Parameters
-        self.brain_state_size = brain_state_size
-        self.memory_state_size = memory_state_size
-
-        # Layers
-        self.fc1 = nn.Linear(brain_state_size, memory_state_size)
-
-    def forward(self, brain_state):
-        return self.fc1(brain_state)
-
-
 class CognitiveModule(nn.Module):
-    def __init__(self, brain_state_size, num_layers=3, num_heads=8, dim_feedforward=2048, dropout=0.1):
-        super(CognitiveModule, self).__init__()
+    def __init__(self, brain_state_size, num_layers, **kwargs):
+        """
+        Cognitive module. This module is the core of the model and is responsible for the cognitive processes. It takes
+        in a brain state and outputs a new brain state. The brain state is a tensor of shape (batch_size, brain_state_size).
+        The output brain state has the same shape as the input brain state. The number of layers is the number of
+        transformer layers in the transformer decoder. The kwargs are passed to the transformer decoder layer.
 
-        # Parameters
+        Args:
+            brain_state_size (int): Size of the brain state.
+            num_layers (int): Number of transformer layers.
+            **kwargs: Keyword arguments passed to the transformer decoder layer.
+
+        Attributes:
+            brain_state_size (int): Size of the brain state.
+            transformer_layer (nn.TransformerDecoderLayer): Transformer decoder layer.
+            transformer (nn.TransformerDecoder): Transformer decoder.
+        """
+        super().__init__()
+
         self.brain_state_size = brain_state_size
-        self.num_layers = num_layers
-        self.num_heads = num_heads
-        self.dim_feedforward = dim_feedforward
-        self.dropout = dropout
 
-        # Transformer Layer
-        self.transformer_layer = nn.TransformerEncoderLayer(
-            d_model=brain_state_size,
-            nhead=num_heads,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation='relu',
-            bias=False
-        )
+        self.transformer_layer = nn.TransformerDecoderLayer(d_model=brain_state_size, **kwargs)
 
-        # Transformer
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer=self.transformer_layer,
-            num_layers=num_layers,
-        )
+        self.transformer = nn.TransformerDecoder(self.transformer_layer, num_layers=num_layers)
 
-    def forward(self, brain_state):
-        return self.transformer(brain_state)
+        self.layer_norm = nn.LayerNorm(brain_state_size)
+
+    def forward(self, x):
+        """
+        Forward pass.
+
+        Args:
+            x (torch.Tensor): Brain state of shape (batch_size, brain_state_size).
+        """
+        x = self.transformer(x, torch.zeros_like(x))
+        x = self.layer_norm(x)
+        return x
 
 
-class TextInputModule(InputModule):
-    def __init__(
-            self,
-            memory_state_size,
-            vocab_size,
-            num_heads=8,
-            dim_feedforward=2048,
-            num_layers=16,
-            dropout=0.1,
-            bias=True,
-    ):
-        super(TextInputModule, self).__init__(memory_state_size)
+class EmbeddingIntegrationModule(nn.Module):
+    def __init__(self, embedding_size, brain_state_size):
+        """
+        Embedding integration module. This module takes in an embedding and a brain state and outputs a new brain state.
+        The embedding is a tensor of shape (batch_size, embedding_size). The brain state is a tensor of shape
+        (batch_size, brain_state_size). The output brain state has the same shape as the input brain state.
 
-        # Embedding
-        self.embedding = nn.Embedding(vocab_size, memory_state_size)
+        Args:
+            embedding_size (int): Size of the embedding.
+            brain_state_size (int): Size of the brain state.
 
-        # Transformer Layer
-        self.transformer_layer = nn.TransformerDecoderLayer(
-            d_model=memory_state_size,
-            nhead=num_heads,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            bias=bias,
-        )
+        Attributes:
+            embedding_size (int): Size of the embedding.
+            brain_state_size (int): Size of the brain state.
+            linear (nn.Linear): Linear layer.
+        """
+        super().__init__()
 
-        # Transformer
-        self.transformer = nn.TransformerDecoder(
-            decoder_layer=self.transformer_layer,
-            num_layers=num_layers,
-        )
+        self.embedding_size = embedding_size
+        self.brain_state_size = brain_state_size
 
-    def forward(self, input_data: torch.Tensor) -> torch.Tensor:
-        # Embedding
-        embedded_input = self.embedding(input_data)
+        self.linear = nn.Linear(embedding_size, brain_state_size)
 
-        # Generate mask
-        tgt_mask = torch.nn.Transformer.generate_square_subsequent_mask(embedded_input.size(0)).to(
-            embedded_input.device)
+    def forward(self, x, y):
+        """
+        Forward pass.
 
-        # Transformer
-        return self.transformer(embedded_input, torch.zeros_like(embedded_input), tgt_mask=tgt_mask)
+        Args:
+            x (torch.Tensor): Embedding of shape (batch_size, embedding_size).
+            y (torch.Tensor): Brain state of shape (batch_size, brain_state_size).
+
+        Returns:
+            torch.Tensor: Brain state of shape (batch_size, brain_state_size).
+        """
+        x = torch.mean(x, dim=1)
+        x = self.linear(x)
+        x = x + y
+        return x
 
 
-class TextOutputModule(OutputModule):
-    def __init__(
-            self,
-            memory_state_size,
-            vocab_size,
-            num_heads=8,
-            dim_feedforward=2048,
-            num_layers=16,
-            dropout=0.1,
-            bias=True,
-    ):
-        super(TextOutputModule, self).__init__(memory_state_size)
+class EmbeddingExtractionModule(nn.Module):
+    def __init__(self, embedding_size, brain_state_size):
+        """
+        Embedding extraction module. This module takes in a brain state and outputs an embedding. The brain state is a
+        tensor of shape (batch_size, brain_state_size). The output embedding has the shape (batch_size, embedding_size).
 
-        # Transformer Layer
-        self.transformer_layer = nn.TransformerDecoderLayer(
-            d_model=memory_state_size,
-            nhead=num_heads,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            bias=bias,
-        )
+        Args:
+            embedding_size (int): Size of the embedding.
+            brain_state_size (int): Size of the brain state.
 
-        # Transformer
-        self.transformer = nn.TransformerDecoder(
-            decoder_layer=self.transformer_layer,
-            num_layers=num_layers,
-        )
+        Attributes:
+            embedding_size (int): Size of the embedding.
+            brain_state_size (int): Size of the brain state.
+            linear (nn.Linear): Linear layer.
+        """
+        super().__init__()
 
-        # Linear
-        self.linear = nn.Linear(memory_state_size, vocab_size)
+        self.embedding_size = embedding_size
+        self.brain_state_size = brain_state_size
 
-    def forward(self, memory_state: torch.Tensor) -> torch.Tensor:
-        # Generate mask
-        tgt_mask = torch.nn.Transformer.generate_square_subsequent_mask(memory_state.size(0)).to(memory_state.device)
+        self.linear = nn.Linear(brain_state_size, embedding_size)
 
-        # Transformer
-        transformer_output = self.transformer(memory_state, torch.zeros_like(memory_state), tgt_mask=tgt_mask)
+    def forward(self, x):
+        """
+        Forward pass.
 
-        # Linear
-        return self.linear(transformer_output)
+        Args:
+            x (torch.Tensor): Brain state of shape (batch_size, brain_state_size).
+
+        Returns:
+            torch.Tensor: Embedding of shape (batch_size, embedding_size).
+        """
+        x = self.linear(x)
+        return x
 
 
 class IntegratedMemoryModel(nn.Module):
-    def __init__(
-            self,
-            brain_state_size,
-            memory_state_size,
-            thinking_iterations=3,
-            cognitive_num_heads=8,
-            cognitive_dim_feedforward=2048,
-            cognitive_num_layers=16,
-            cognitive_dropout=0.1,
-    ):
-        super(IntegratedMemoryModel, self).__init__()
+    def __init__(self, embedding_size, brain_state_size, num_layers, thinking_iterations, **kwargs):
+        """
+        Integrated memory model. This model is a combination of the embedding extraction module, the embedding
+        integration module and the cognitive module. It takes in an input and outputs an output. The input is a
+        dictionary of tensors. The tensors are the inputs for the input modules. The output is a dictionary of
+        tensors. The tensors are the outputs of the output modules. The input modules are stored in the input_modules
+        dictionary. The output modules are stored in the output_modules dictionary. The brain state is a tensor of
+        shape (batch_size, brain_state_size).
 
-        # Parameters
+        Args:
+            embedding_size (int): Size of the embedding.
+            brain_state_size (int): Size of the brain state.
+            num_layers (int): Number of transformer layers.
+            thinking_iterations (int): Number of thinking iterations.
+            **kwargs: Keyword arguments passed to the transformer decoder layer.
+        """
+        super().__init__()
+
+        self.embedding_size = embedding_size
         self.brain_state_size = brain_state_size
-        self.memory_state_size = memory_state_size
         self.thinking_iterations = thinking_iterations
 
-        # Define brain state
-        self.brain_state = nn.Parameter(torch.zeros(1, brain_state_size))
-        self.brain_state.requires_grad = False
+        self.embedding_extraction_module = EmbeddingExtractionModule(embedding_size, brain_state_size)
+        self.embedding_integration_module = EmbeddingIntegrationModule(embedding_size, brain_state_size)
+        self.cognitive_module = CognitiveModule(brain_state_size, num_layers, **kwargs)
 
-        # Input Modules
         self.input_modules = nn.ModuleDict()
-
-        # Output Modules
         self.output_modules = nn.ModuleDict()
 
-        # Core Modules
-        self.pipe_in_module = PipeInModule(brain_state_size, memory_state_size)
-        self.pipe_out_module = PipeOutModule(brain_state_size, memory_state_size)
-        self.cognitive_module = CognitiveModule(brain_state_size, cognitive_num_layers, cognitive_num_heads,
-                                                cognitive_dim_feedforward, cognitive_dropout)
+        self.brain_state = None
 
-    def reset_brain_state(self, device="cuda") -> None:
-        self.brain_state.data = torch.zeros(1, self.brain_state_size, device=device)
+    def add_input_module(self, name, module):
+        """
+        Adds an input module.
 
-    def forward(self, input_data: dict) -> dict:
-        # Memory Dict
-        memory_data = {}
-
-        # Input loop
-        for key, input_module in self.input_modules.items():
-            memory_data[key] = input_module(input_data[key])
-
-        # Pipe in
-        for memory in memory_data.values():
-            self.brain_state.data = self.pipe_in_module(memory, self.brain_state)
-
-        # Cognitive
-        for _ in range(self.thinking_iterations):
-            self.brain_state.data = self.cognitive_module(self.brain_state)
-
-        # Output Dict
-        output_dict = {}
-
-        # Output loop
-        for key, output_module in self.output_modules.items():
-            output_dict[key] = output_module(self.pipe_out_module(self.brain_state))
-
-        # Return
-        return output_dict
-
-    def add_input_module(self, name: str, module: InputModule) -> None:
-        if name in self.input_modules:
-            raise ValueError(f"Input module with name {name} already exists.")
+        Args:
+            name (str): Name of the input module.
+            module (nn.Module): Input module.
+        """
 
         self.input_modules[name] = module
 
-    def add_output_module(self, name: str, module: OutputModule) -> None:
-        if name in self.output_modules:
-            raise ValueError(f"Output module with name {name} already exists.")
+    def add_output_module(self, name, module):
+        """
+        Adds an output module.
+
+        Args:
+            name (str): Name of the output module.
+            module (nn.Module): Output module.
+        """
 
         self.output_modules[name] = module
 
-    def get_brain_state(self) -> torch.Tensor:
-        return self.brain_state
+    def init_brain_state(self, batch_size: int) -> None:
+        """
+        Initializes the brain state.
 
+        Args:
+            batch_size (int): Batch size.
+        """
 
-class IntegratedMemoryModelLightning(pl.LightningModule):
-    def __init__(
-            self,
-            model: IntegratedMemoryModel,
-            learning_rate: float = 1e-3,
-    ):
-        super(IntegratedMemoryModelLightning, self).__init__()
+        self.brain_state = torch.zeros(batch_size, self.brain_state_size, device=self.device)
 
-        # Model
-        self.model = model
+    def reset_brain_state(self) -> None:
+        """
+        Resets the brain state.
+        """
 
-        # Learning rate
-        self.learning_rate = learning_rate
+        self.brain_state = None
 
-    def forward(self, input_data: dict) -> dict:
-        return self.model(input_data)
+    def to(self, *args, **kwargs) -> "IntegratedMemoryModel":
+        """
+        Moves the model to the specified device and changes the data type if dtype is specified.
+        This method is compatible with PyTorch's nn.Module to() method.
 
-    def training_step(self, batch, batch_idx):
-        self.model.reset_brain_state()
-        total_loss = 0.0
+        Args:
+            *args: Variable length argument list for device and/or dtype.
+            **kwargs: Arbitrary keyword arguments for device and/or dtype.
 
-        for minibatch in batch:
-            output = self.model(minibatch["text_input"])
-            loss = F.cross_entropy(output['text_output'], minibatch["labels"])
-            total_loss += loss
+        Returns:
+            IntegratedMemoryModel: The model itself.
+        """
 
-        avg_loss = total_loss / len(batch)
-        perplexity = torch.exp(avg_loss)
-        self.log('Loss', avg_loss, on_step=True, on_epoch=False)
-        self.log('Perplexity', perplexity, on_step=True, on_epoch=False)
+        super().to(*args, **kwargs)
 
-        return avg_loss
+        device, dtype = None, None
 
-    def validation_step(self, batch, batch_idx):
-        self.model.reset_brain_state()
-        total_loss = 0.0
+        # Handling args and kwargs to extract device and dtype
+        if len(args) > 0:
+            if isinstance(args[0], torch.device):
+                device = args[0]
+            elif isinstance(args[0], torch.dtype):
+                dtype = args[0]
 
-        for minibatch in batch:
-            output = self.model({"text_input":minibatch["inputs"].squeeze(0)})
-            loss = F.cross_entropy(output['text_output'], minibatch["labels"].squeeze(0))
-            total_loss += loss
+        device = kwargs.get("device", device)
+        dtype = kwargs.get("dtype", dtype)
 
-        avg_loss = total_loss / len(batch)
-        perplexity = torch.exp(avg_loss)
-        self.log('Val_Loss', avg_loss, on_step=True, on_epoch=False)
-        self.log('Val_Perplexity', perplexity, on_step=True, on_epoch=False)
+        # Apply to() to all sub-modules with appropriate device and dtype
+        for module in self.input_modules.values():
+            if device and dtype:
+                module.to(device, dtype)
+            elif device:
+                module.to(device)
+            elif dtype:
+                module.to(dtype=dtype)
 
-        return avg_loss
+        for module in self.output_modules.values():
+            if device and dtype:
+                module.to(device, dtype)
+            elif device:
+                module.to(device)
+            elif dtype:
+                module.to(dtype=dtype)
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=None):
-        # Get data
-        input_data, target_data = batch
+        self.embedding_extraction_module.to(*args, **kwargs)
+        self.embedding_integration_module.to(*args, **kwargs)
+        self.cognitive_module.to(*args, **kwargs)
 
-        # Run model
-        output = self(input_data)
+        if self.brain_state is not None:
+            if device and dtype:
+                self.brain_state = self.brain_state.to(device, dtype)
+            elif device:
+                self.brain_state = self.brain_state.to(device)
+            elif dtype:
+                self.brain_state = self.brain_state.to(dtype=dtype)
 
-        return output
+        return self
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
-        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+    def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """
+        Forward pass.
 
-    def get_brain_state(self) -> torch.Tensor:
-        return self.model.get_brain_state()
+        Args:
+            x (dict): Input dictionary.
 
-    def reset_brain_state(self, device="cuda") -> None:
-        self.model.reset_brain_state(device)
+        Returns:
+            dict: Output dictionary.
+        """
+
+        # Loop over input modules and pass the inputs through them to get the embeddings
+        # Then integrate the embeddings into the brain state
+        for name, module in self.input_modules.items():
+            embedding = module(x[name])
+            self.brain_state = self.embedding_integration_module(embedding, self.brain_state)
+
+        # Pass the brain state through the cognitive module thinking_iterations times
+        for _ in range(self.thinking_iterations):
+            self.brain_state = self.cognitive_module(self.brain_state)
+
+        # Loop over output modules and pass the brain state through them to get the outputs
+        outputs = {}
+        for name, module in self.output_modules.items():
+            outputs[name] = module(self.embedding_extraction_module(self.brain_state))
+
+        return outputs
