@@ -47,7 +47,8 @@ class IntegratedMemoryModel(nn.Module):
 
         # Check that hidden state is initialized and has the correct size
         if self.hidden_state is None:
-            self.hidden_state = torch.zeros(batch_size, self.config.embed_dim, device=self.device)
+            self.hidden_state = torch.zeros(batch_size, self.config.max_seq_len,
+                                            self.config.embed_dim, device=self.device)
         else:
             assert self.hidden_state.shape[0] == batch_size, "Hidden state has incorrect size"
 
@@ -68,7 +69,7 @@ class IntegratedMemoryModel(nn.Module):
 
         # Loop over all outputs and pass the output embedding through all output modules
         outputs = {}
-        for key in output_embeddings.keys():
+        for key in self.output_modules.keys():
             outputs[key] = self.output_modules[key](output_embeddings)
 
         return outputs

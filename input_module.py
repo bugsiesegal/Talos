@@ -40,4 +40,8 @@ class TextInputModule(InputModule):
 
         x = x + pos
 
+        # Make sure the sequence length is max_seq_len by padding with zeros
+        if t < self.config.max_seq_len:
+            x = F.pad(x, (0, 0, 0, self.config.max_seq_len - t), "constant", 0)
+
         return self.linear(x)

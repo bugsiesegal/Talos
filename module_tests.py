@@ -236,7 +236,8 @@ class TestIntegratedMemoryModel(unittest.TestCase):
         model = IntegratedMemoryModel(self.config)
         model.add_input_module("text", TextInputModule(self.config))
         model.add_output_module("text", TextOutputModule(self.config))
-        input_tensor = torch.randint(0, self.config.vocab_size, (32, 100))
+        model = model.to('cuda' if torch.cuda.is_available() else 'cpu')
+        input_tensor = torch.randint(0, self.config.vocab_size, (32, 100)).to(model.device)
         output = model({"text": input_tensor})
         self.assertEqual(output.shape, (32, 100, self.config.vocab_size))
 

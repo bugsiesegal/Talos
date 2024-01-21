@@ -10,7 +10,7 @@ class Config:
     embed_dim: int = 768
     # Transformer
     num_heads: int = 12
-    num_layers: int = 12
+    num_layers: int = 2
     hidden_dim: int = 3072
     dropout: float = 0.1
     activation: str = 'gelu'

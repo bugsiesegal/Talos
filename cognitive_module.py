@@ -33,8 +33,6 @@ class TransformerModule(nn.Module):
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
@@ -80,7 +78,7 @@ class TransformerModule(nn.Module):
 
     def forward(self, x, mask=None, memory=None):
         if mask is None:
-            mask = torch.ones(x.shape[0], x.shape[1], dtype=torch.bool, device=x.device)
+            mask = torch.zeros(x.shape[0], x.shape[1], dtype=torch.bool, device=x.device)
 
         # Create a copy of the input tensor to store updates
         x_updated = x.clone()
