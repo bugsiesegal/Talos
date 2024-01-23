@@ -30,3 +30,5 @@ class Config:
     # Dataset
     huggingface_dataset: str = 'openai/webtext'
     stream: bool = False
+    # Learning rate
+    lr: float = 1e-4

@@ -26,6 +26,9 @@ class IntegratedMemoryModel(nn.Module):
 
         self.hidden_state = None
 
+    def reset_hidden_state(self):
+        self.hidden_state = None
+
     def add_input_module(self, name, module):
         self.input_modules[name] = module
 
