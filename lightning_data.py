@@ -1,6 +1,8 @@
 import lightning as pl
 from datasets import load_dataset
 from transformers import AutoTokenizer
+import torch
+from torch.utils.data import DataLoader
 
 
 class HFStreamedTextDatamodule(pl.LightningDataModule):
@@ -36,23 +38,22 @@ class HFStreamedTextDatamodule(pl.LightningDataModule):
                                             max_length=self.max_seq_len
                                         ),
                                         batched=True,
-                                        batch_size=self.batch_size,
                                         )
 
     def train_dataloader(self):
         try:
-            return self.dataset['train']
+            return DataLoader(self.dataset['train'], batch_size=self.batch_size)
         except KeyError:
             return None
 
     def val_dataloader(self):
         try:
-            return self.dataset['validation']
+            return DataLoader(self.dataset['validation'], batch_size=self.batch_size)
         except KeyError:
             return None
 
     def test_dataloader(self):
         try:
-            return self.dataset['test']
+            return DataLoader(self.dataset['test'], batch_size=self.batch_size)
         except KeyError:
             return None

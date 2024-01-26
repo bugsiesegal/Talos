@@ -20,11 +20,11 @@ class TransformerModule(nn.Module):
         if config.think_twice:
             self.linear = nn.Linear(config.embed_dim, 1, bias=config.bias)
 
-        # Weight initialization described in nanoGPT by karpathy
-        self.apply(self._init_weights)
-        for pn, p in self.named_parameters():
-            if pn.endswith('c_proj.weight'):
-                torch.nn.init.zeros_(p)
+        # # Weight initialization described in nanoGPT by karpathy
+        # self.apply(self._init_weights)
+        # for pn, p in self.named_parameters():
+        #     if pn.endswith('c_proj.weight'):
+        #         torch.nn.init.zeros_(p)
 
     def to(self, *args, **kwargs):
         self.device = args[0]
@@ -89,6 +89,7 @@ class TransformerModule(nn.Module):
         for _ in range(self.config.thinking_steps):
             # Run the transformer only on the selected batches
             x_transformed = self.run_transformer(x_updated[update_mask], mask[update_mask], memory)
+            x_transformed = x_transformed.to(x_updated.dtype)
             x_updated[update_mask] = x_transformed
 
             if self.config.think_twice:

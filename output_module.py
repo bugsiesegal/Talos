@@ -26,7 +26,7 @@ class TextOutputModule(OutputModule):
     def __init__(self, config):
         super().__init__(config)
 
-        self.linear = nn.Linear(config.embed_dim * config.max_seq_len, config.vocab_size, bias=config.bias)
+        self.linear = nn.Linear(config.embed_dim * config.context_length, config.vocab_size, bias=config.bias)
 
     def forward(self, x):
         return self.linear(x.reshape(x.shape[0], -1))

@@ -30,15 +30,18 @@ class LightningIntegratedMemoryModelText(pl.LightningModule):
 
         self.loss = torch.nn.CrossEntropyLoss()
 
-        self.learning_rate = config.lr
+        self.lr = config.lr
 
     def generate(self, input_ids, max_length, eos_token_id=50256, stop_at_eos=True):
         # Function to generate text token by token
         generated_sequence_length = 0
 
+        outputs = []
+
         for _ in range(max_length):
             generated_sequence_length += 1
             output = self.model({"text": input_ids})
+            outputs.append(output['text'])
 
             # Append the generated token to the input sequence
             input_ids = torch.cat((input_ids, output['text'].argmax(dim=-1).unsqueeze(1)), dim=1)
@@ -48,51 +51,69 @@ class LightningIntegratedMemoryModelText(pl.LightningModule):
                 break
 
             # Maintain input sequence length
-            input_ids = input_ids[:, -self.config.max_seq_len:]
+            input_ids = input_ids[:, -self.config.context_length:]
 
-        return input_ids[:, -generated_sequence_length:]
+        return torch.stack(outputs, axis=1)
 
     def training_step(self, batch, batch_idx):
+        self.model.reset_hidden_state()
         # Training step for the model
-        input_ids = batch['input_ids']
-        unfolded_input_ids = input_ids.unfold(1, self.config.max_seq_len, 1)
+        input_ids = torch.vstack(batch['input_ids'])
+        unfolded_input_ids = input_ids.unfold(0, self.config.context_length, 1)
 
         total_loss = 0
 
-        for batch_ids in unfolded_input_ids.transpose(0, 1):
+        for batch_ids in unfolded_input_ids:
+            loss = 1
             # Generate next token and calculate loss
             generated_ids = self.generate(batch_ids, self.num_generated_tokens, stop_at_eos=False)
-            total_loss += self.loss(generated_ids, batch_ids[:, self.num_generated_tokens:])
+            for i in range(generated_ids.shape[1]):
+                loss *= self.loss(generated_ids[:, i], batch_ids[:, -self.num_generated_tokens + i])
+            total_loss += loss
 
-        return total_loss
+        self.log('train_loss', total_loss / unfolded_input_ids.shape[0])
+
+        return total_loss / unfolded_input_ids.shape[0]
 
     def validation_step(self, batch, batch_idx):
+        self.model.reset_hidden_state()
         # Validation step for the model
-        input_ids = batch['input_ids']
-        unfolded_input_ids = input_ids.unfold(1, self.config.max_seq_len, 1)
+        input_ids = torch.vstack(batch['input_ids'])
+        unfolded_input_ids = input_ids.unfold(0, self.config.context_length, 1)
 
         total_loss = 0
 
-        for batch_ids in unfolded_input_ids.transpose(0, 1):
+        for batch_ids in unfolded_input_ids:
+            loss = 1
             # Generate next token and calculate loss
             generated_ids = self.generate(batch_ids, self.num_generated_tokens, stop_at_eos=False)
-            total_loss += self.loss(generated_ids, batch_ids[:, self.num_generated_tokens:])
+            for i in range(generated_ids.shape[1]):
+                loss *= self.loss(generated_ids[:, i], batch_ids[:, -self.num_generated_tokens + i])
+            total_loss += loss
 
-        return total_loss
+        self.log('val_loss', total_loss / unfolded_input_ids.shape[0])
+
+        return total_loss / unfolded_input_ids.shape[0]
 
     def test_step(self, batch, batch_idx):
+        self.model.reset_hidden_state()
         # Test step for the model
-        input_ids = batch['input_ids']
-        unfolded_input_ids = input_ids.unfold(1, self.config.max_seq_len, 1)
+        input_ids = torch.vstack(batch['input_ids'])
+        unfolded_input_ids = input_ids.unfold(0, self.config.context_length, 1)
 
         total_loss = 0
 
-        for batch_ids in unfolded_input_ids.transpose(0, 1):
+        for batch_ids in unfolded_input_ids:
+            loss = 1
             # Generate next token and calculate loss
             generated_ids = self.generate(batch_ids, self.num_generated_tokens, stop_at_eos=False)
-            total_loss += self.loss(generated_ids, batch_ids[:, self.num_generated_tokens:])
+            for i in range(generated_ids.shape[1]):
+                loss *= self.loss(generated_ids[:, i], batch_ids[:, -self.num_generated_tokens + i])
+            total_loss += loss
 
-        return total_loss
+        self.log('test_loss', total_loss / unfolded_input_ids.shape[0])
+
+        return total_loss / unfolded_input_ids.shape[0]
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         # Configure optimizer and learning rate scheduler

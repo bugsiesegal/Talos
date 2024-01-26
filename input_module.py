@@ -27,7 +27,7 @@ class TextInputModule(InputModule):
         super().__init__(config)
 
         self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
-        self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
+        self.position_embedding = nn.Embedding(config.context_length, config.embed_dim)
         self.linear = nn.Linear(config.embed_dim, config.embed_dim, bias=config.bias)
 
     def forward(self, x):
@@ -41,7 +41,7 @@ class TextInputModule(InputModule):
         x = x + pos
 
         # Make sure the sequence length is max_seq_len by padding with zeros
-        if t < self.config.max_seq_len:
-            x = F.pad(x, (0, 0, 0, self.config.max_seq_len - t), "constant", 0)
+        if t < self.config.context_length:
+            x = F.pad(x, (0, 0, 0, self.config.context_length - t), "constant", 0)
 
         return self.linear(x)

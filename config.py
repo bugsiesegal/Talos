@@ -16,6 +16,7 @@ class Config:
     activation: str = 'gelu'
     bias: bool = True
     transformer_type: str = 'encoder'
+    context_length: int = 8
     # Modules
     device: str = 'cuda'
     # Cognitive Module

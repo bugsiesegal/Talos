@@ -49,11 +49,11 @@ class TestTextInputModule(unittest.TestCase):
         # Test boundary conditions
         text_input_module = TextInputModule(self.config)
         min_input_tensor = torch.randint(0, self.config.vocab_size, (1, 1))  # Min length
-        max_input_tensor = torch.randint(0, self.config.vocab_size, (1, self.config.max_seq_len))  # Max length
+        max_input_tensor = torch.randint(0, self.config.vocab_size, (1, self.config.context_length))  # Max length
         output_min = text_input_module(min_input_tensor)
         output_max = text_input_module(max_input_tensor)
         self.assertEqual(output_min.shape, (1, 1, self.config.embed_dim))
-        self.assertEqual(output_max.shape, (1, self.config.max_seq_len, self.config.embed_dim))
+        self.assertEqual(output_max.shape, (1, self.config.context_length, self.config.embed_dim))
 
 
 class TestTextOutputModule(unittest.TestCase):
