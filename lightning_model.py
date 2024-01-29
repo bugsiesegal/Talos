@@ -37,29 +37,6 @@ class LightningIntegratedMemoryModelText(pl.LightningModule):
 
         self.wandb_logger = WandbLogger(project="integrated-memory-model", log_model="all")
 
-    # def generate(self, input_ids, max_length, eos_token_id=50256, stop_at_eos=True):
-    #     # Function to generate text token by token
-    #     generated_sequence_length = 0
-    #
-    #     outputs = []
-    #
-    #     for _ in range(max_length):
-    #         generated_sequence_length += 1
-    #         output = self.model({"text": input_ids})
-    #         outputs.append(output['text'])
-    #
-    #         # Append the generated token to the input sequence
-    #         input_ids = torch.cat((input_ids, output['text'].argmax(dim=-1).unsqueeze(1)), dim=1)
-    #
-    #         # Stop if EOS token is generated
-    #         if output['text'].argmax(dim=-1)[-1] == eos_token_id and stop_at_eos:
-    #             break
-    #
-    #         # Maintain input sequence length
-    #         input_ids = input_ids[:, -self.config.context_length:]
-    #
-    #     return torch.stack(outputs, axis=1)
-
     def training_step(self, batch, batch_idx):
         self.model.reset_hidden_state()
         # Training step for the model
@@ -78,18 +55,6 @@ class LightningIntegratedMemoryModelText(pl.LightningModule):
             self.log('train_perplexity', perplexity)
             total_loss += loss
             total_perplexity += perplexity
-
-        if batch_idx % 100 == 0:
-            generated_prob = torch.softmax(generated_ids['text'], dim=-1)
-            self.wandb_logger.log_table(
-                key='sample',
-                columns=['input_ids', 'expected_output_prob', 'expected_output'],
-                data=[
-                        [str(batch_ids[0, :-1].detach().cpu().tolist()),
-                        generated_prob[0, batch_ids[0, -self.num_generated_tokens]].detach().cpu().tolist(),
-                        batch_ids[0, -self.num_generated_tokens].detach().cpu().tolist()]
-                ]
-            )
 
         return total_loss
 
