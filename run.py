@@ -1,11 +1,11 @@
-import lightning as pl
-from lightning.pytorch.callbacks import ModelCheckpoint, BatchSizeFinder, LearningRateFinder
-from lightning.pytorch.loggers import WandbLogger
 from transformers import AutoTokenizer
 
+from lightning_model import LightningIntegratedMemoryModelText
 from config import Config
 from lightning_data import HFStreamedTextDatamodule
-from lightning_model import LightningIntegratedMemoryModelText
+import lightning as pl
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint, BatchSizeFinder, LearningRateFinder, ModelSummary
 
 config = Config()
 
@@ -14,31 +14,30 @@ config.vocab_size = tokenizer.vocab_size
 tokenizer.pad_token = tokenizer.eos_token
 
 # Hyperparameters
-config.max_seq_len = 512
-config.batch_size = 1
+config.max_seq_len = 128
+config.batch_size = 16
 config.learning_rate = 1e-4
 config.epochs = 10
-config.context_length = 8
-config.thinking_steps = 5
+config.context_length = 4
+config.thinking_steps = 10
 config.think_twice = False
 config.stream = True
 
 # Model Parameters
-config.embed_dim = 128
-config.num_heads = 8
-config.num_layers = 4
+config.embed_dim = 256
+config.num_heads = 16
+config.num_layers = 8
 config.hidden_dim = 512
 config.dropout = 0.1
 config.activation = 'gelu'
 config.bias = False
 
-
 model = LightningIntegratedMemoryModelText(config)
 
 # Initialize the data module
 dm = HFStreamedTextDatamodule(
-    path="wikitext",
-    subset="wikitext-2-v1",
+    path="c4",
+    subset="en",
     text_column="text",
     tokenizer=tokenizer,
     batch_size=config.batch_size,
@@ -55,14 +54,12 @@ trainer = pl.Trainer(
     logger=wandb_logger,
     callbacks=[
         checkpoint_callback,
-        # BatchSizeFinder()
+        # BatchSizeFinder(),
+        ModelSummary(max_depth=3)
     ],
-    log_every_n_steps=20,
-    max_time={"minutes": 3},
-    val_check_interval=1000,
+    log_every_n_steps=10,
+    max_time={"hours": 20}
 )
 
 # Train the model
 trainer.fit(model, datamodule=dm)
-
-

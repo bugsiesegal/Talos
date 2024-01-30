@@ -9,63 +9,39 @@ from lightning.pytorch.callbacks import ModelCheckpoint, BatchSizeFinder, Learni
 import wandb
 import torch
 
-
 # run = wandb.init()
-# artifact = run.use_artifact('bugsiesegal/integrated-memory-model/model-hm03722l:v0', type='model')
+# artifact = run.use_artifact('bugsiesegal/model-registry/IntegratedMemoryModelV1:v0', type='model')
 # artifact_dir = artifact.download()
 
-config = Config()
-
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
-config.vocab_size = tokenizer.vocab_size
 tokenizer.pad_token = tokenizer.eos_token
 
-# Hyperparameters
-config.max_seq_len = 512
-config.batch_size = 16
-config.learning_rate = 1e-4
-config.epochs = 10
-config.context_length = 8
-config.thinking_steps = 5
-config.think_twice = False
-config.stream = True
-
-# Model Parameters
-config.embed_dim = 128
-config.num_heads = 8
-config.num_layers = 4
-config.hidden_dim = 512
-config.dropout = 0.1
-config.activation = 'gelu'
-config.bias = False
-
-
-model = LightningIntegratedMemoryModelText(config)
-
-state_dict = torch.load("/home/bugsie/PycharmProjects/Talos/artifacts/model-hm03722l:v0" + "/model.ckpt", map_location=torch.device('cpu'))['state_dict']
-
-model.load_state_dict(state_dict)
+model = LightningIntegratedMemoryModelText.load_from_checkpoint(
+    checkpoint_path="/home/bugsie/PycharmProjects/Talos/artifacts/model-1r43r7n8:v0/model.ckpt",
+)
 
 model.model.to('cpu')
 
+model.model.reset_hidden_state()
+
 while True:
     text = input("Enter text: ")
+
+    output_string = ""
     # Encode the text
     input_ids = tokenizer.encode(text, return_tensors="pt")
-    # Get last token of the sequence
-    last_token = input_ids[:, -1]
-    # Truncate the sequence if it is longer than the context length
-    input_ids = input_ids[:, -config.context_length:]
-    # Generate the next token
-    output = model.model({"text": input_ids})
-    # Normalize the logits
-    output = torch.softmax(output['text'], dim=-1)
-    # Get the probability of the last token
-    last_token_prob = output[:, last_token]
-    # Get the top 10 tokens and their probabilities
-    top10_tokens_and_probs = torch.topk(output, 10, dim=-1)
-    # Print the top 10 tokens and their probabilities
-    for token, prob in zip(top10_tokens_and_probs.indices.tolist()[0], top10_tokens_and_probs.values.tolist()[0]):
-        print(f"{tokenizer.decode(token)}: {prob}")
+    # Loop over the input ids and generate the next token and generate the next token till the end of the sequence
+    for i in range(100 + len(input_ids)):
+        # Get the context window
+        context_window = input_ids[:, i:i + model.config.context_length]
+        # Generate the next token
+        generated_ids = model.model({"text": context_window})['text'].argmax(dim=-1).unsqueeze(0)
+        # If i-context_length is equal to input_ids length, then we need to append the next token to
+        # the input_ids.
+        if i == len(input_ids[0]) - model.config.context_length:
+            input_ids = torch.cat([input_ids, generated_ids], dim=1)
+            # Append the generated token to the output string
+            output_string += tokenizer.decode(generated_ids[0].tolist())
+            print(output_string)
 
-    print(f"{tokenizer.decode(last_token)}: {last_token_prob.tolist()[0][0]}")
+
