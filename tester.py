@@ -30,18 +30,11 @@ while True:
     output_string = ""
     # Encode the text
     input_ids = tokenizer.encode(text, return_tensors="pt")
-    # Loop over the input ids and generate the next token and generate the next token till the end of the sequence
-    for i in range(100 + len(input_ids)):
-        # Get the context window
-        context_window = input_ids[:, i:i + model.config.context_length]
-        # Generate the next token
-        generated_ids = model.model({"text": context_window})['text'].argmax(dim=-1).unsqueeze(0)
-        # If i-context_length is equal to input_ids length, then we need to append the next token to
-        # the input_ids.
-        if i == len(input_ids[0]) - model.config.context_length:
-            input_ids = torch.cat([input_ids, generated_ids], dim=1)
-            # Append the generated token to the output string
-            output_string += tokenizer.decode(generated_ids[0].tolist())
-            print(output_string)
+    # Generate the output
+    generated_ids = model.generate(input_ids, strategy="top_k", top_k=10, temperature=0.7)
+    # Decode the output
+    output_string += tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+    # Print the output
+    print(output_string)
 
 

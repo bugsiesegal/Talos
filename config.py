@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-
+from torch.optim import lr_scheduler
+from functools import partial
 
 @dataclass
 class Config:
@@ -33,3 +34,4 @@ class Config:
     stream: bool = False
     # Learning rate
     lr: float = 1e-4
+    learning_rate_scheduler: partial = partial(lr_scheduler.StepLR, step_size=1, gamma=0.9)

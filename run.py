@@ -1,3 +1,6 @@
+from functools import partial
+
+from torch.optim import lr_scheduler
 from transformers import AutoTokenizer
 
 from lightning_model import LightningIntegratedMemoryModelText
@@ -18,10 +21,14 @@ config.max_seq_len = 128
 config.batch_size = 16
 config.learning_rate = 1e-4
 config.epochs = 10
+config.initial_context_length = 128
 config.context_length = 4
-config.thinking_steps = 10
+config.thinking_steps = 5
 config.think_twice = False
 config.stream = True
+
+# Learning Rate Scheduler
+config.learning_rate_scheduler = partial(lr_scheduler.CosineAnnealingLR, T_max=10)
 
 # Model Parameters
 config.embed_dim = 256
@@ -55,7 +62,7 @@ trainer = pl.Trainer(
     callbacks=[
         checkpoint_callback,
         # BatchSizeFinder(),
-        ModelSummary(max_depth=3)
+        ModelSummary(max_depth=4)
     ],
     log_every_n_steps=10,
     max_time={"hours": 20}
