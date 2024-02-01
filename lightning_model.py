@@ -1,16 +1,12 @@
-from typing import Any
-
+import lightning as pl
 import torch
-import torch.nn.functional as F
-from lightning.pytorch.utilities.types import STEP_OUTPUT, OptimizerLRScheduler
+from lightning.pytorch.utilities.types import OptimizerLRScheduler
 
+from config import Config
 from input_module import TextInputModule
-from output_module import TextOutputModule
 from model import IntegratedMemoryModel
 from model_utils import select_output_token
-from config import Config
-import lightning as pl
-from lightning.pytorch.loggers import WandbLogger
+from output_module import TextOutputModule
 
 
 class LightningIntegratedMemoryModelText(pl.LightningModule):
