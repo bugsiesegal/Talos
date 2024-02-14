@@ -12,10 +12,10 @@ class Config:
     # Transformer
     num_heads: int = 12
     num_layers: int = 2
-    hidden_dim: int = 3072
-    dropout: float = 0.1
+    hidden_dim: int = 1024
+    dropout: float = 0.0
     activation: str = 'gelu'
-    bias: bool = True
+    bias: bool = False
     transformer_type: str = 'encoder'
     context_length: int = 8
     # Modules

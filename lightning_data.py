@@ -26,10 +26,8 @@ class HFStreamedTextDatamodule(pl.LightningDataModule):
         self.dataset = None
         self.tokenizer = tokenizer
 
-    def prepare_data(self):
-        self.dataset = load_dataset(path=self.path, name=self.subset, streaming=True)
-
     def setup(self, stage=None):
+        self.dataset = load_dataset(path=self.path, name=self.subset, streaming=True)
         self.dataset = self.dataset.map(lambda x:
                                         self.tokenizer(
                                             x[self.text_column],

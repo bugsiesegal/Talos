@@ -26,7 +26,9 @@ class TextOutputModule(OutputModule):
     def __init__(self, config):
         super().__init__(config)
 
-        self.linear = nn.Linear(config.embed_dim * config.context_length, config.vocab_size, bias=config.bias)
+        self.linear = nn.Linear(config.embed_dim, config.vocab_size, bias=config.bias)
+        self.pooling = nn.AdaptiveAvgPool1d(1)
 
     def forward(self, x):
+        x = self.pooling(x.permute(0, 2, 1)).squeeze(-1)
         return self.linear(x.reshape(x.shape[0], -1))

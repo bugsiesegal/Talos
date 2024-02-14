@@ -13,12 +13,17 @@ import torch
 # artifact = run.use_artifact('bugsiesegal/model-registry/IntegratedMemoryModelV1:v0', type='model')
 # artifact_dir = artifact.download()
 
+config = Config()
+
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 tokenizer.pad_token = tokenizer.eos_token
+config.vocab_size = tokenizer.vocab_size
 
-model = LightningIntegratedMemoryModelText.load_from_checkpoint(
-    checkpoint_path="/home/bugsie/PycharmProjects/Talos/artifacts/model-1r43r7n8:v0/model.ckpt",
-)
+model = LightningIntegratedMemoryModelText(config)
+
+# model = LightningIntegratedMemoryModelText.load_from_checkpoint(
+#     checkpoint_path="/home/bugsie/PycharmProjects/Talos/artifacts/model-1r43r7n8:v0/model.ckpt",
+# )
 
 model.model.to('cpu')
 

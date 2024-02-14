@@ -1,5 +1,0 @@
-wandb
-lightning
-transformers
-datasets
-torch
