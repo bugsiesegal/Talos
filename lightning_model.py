@@ -241,4 +241,4 @@ class LightningIntegratedMemoryModelText(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         lr_scheduler = self.learning_rate_scheduler(optimizer)
 
-        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler}
+        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler, "monitor": "validation_perplexity"}

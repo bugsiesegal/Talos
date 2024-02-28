@@ -1,11 +1,12 @@
 import lightning as pl
-from datasets import load_dataset
+from datasets import load_dataset, IterableDataset
 from transformers import AutoTokenizer
 import torch
 from torch.utils.data import DataLoader
 
 
 class HFStreamedTextDatamodule(pl.LightningDataModule):
+    dataset: IterableDataset
     def __init__(
             self,
             path: str,
@@ -37,6 +38,7 @@ class HFStreamedTextDatamodule(pl.LightningDataModule):
                                         ),
                                         batched=True,
                                         )
+        self.dataset.shuffle(buffer_size=10_000)
 
     def train_dataloader(self):
         try:

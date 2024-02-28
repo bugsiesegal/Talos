@@ -10,7 +10,7 @@ from lightning_model import LightningIntegratedMemoryModelText
 from config import Config
 from lightning_data import HFStreamedTextDatamodule
 import lightning as pl
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, BatchSizeFinder, LearningRateFinder, ModelSummary
 
 
@@ -33,7 +33,7 @@ def run():
     config.stream = True
 
     # Learning Rate Scheduler
-    config.learning_rate_scheduler = partial(lr_scheduler.CosineAnnealingLR, T_max=10)
+    config.learning_rate_scheduler = partial(lr_scheduler.ReduceLROnPlateau, patience=10, factor=0.1)
 
     # Model Parameters
     config.embed_dim = wandb.config["embed_dim"]
@@ -44,13 +44,19 @@ def run():
     config.activation = 'gelu'
     config.bias = False
 
+    # artifact = run.use_artifact('bugsiesegal/uncategorized/model-y0myi4ep:v1', type='model')
+    # artifact_dir = artifact.download()
+
     # Initialize the model
     model = LightningIntegratedMemoryModelText(config)
 
+    # Load the model from the artifact
+    # model.load_state_dict(torch.load(f"{artifact_dir}/model.ckpt"), strict=False)
+
     # Initialize the data module
     dm = HFStreamedTextDatamodule(
-        path="wikitext",
-        subset="wikitext-103-raw-v1",
+        path="c4",
+        subset="en",
         text_column="text",
         tokenizer=tokenizer,
         batch_size=config.batch_size,
@@ -58,20 +64,23 @@ def run():
     )
 
     wandb_logger = WandbLogger(project="integrated-memory-model", log_model="all")
+    tensorboard_logger = TensorBoardLogger("logs/")
     checkpoint_callback = ModelCheckpoint(monitor="validation_perplexity", mode="min")
 
     # Initialize the trainer
     trainer = pl.Trainer(
         precision="16-mixed",
-        max_epochs=config.epochs,
-        logger=wandb_logger,
+        logger=[wandb_logger, tensorboard_logger],
         callbacks=[
             checkpoint_callback,
             BatchSizeFinder(),
-            ModelSummary(max_depth=4)
+            ModelSummary(max_depth=4),
+            LearningRateFinder(),
         ],
         log_every_n_steps=10,
-        max_time={"hours": wandb.config["max_time_hours"]}
+        max_time={"hours": wandb.config["max_time_hours"]},
+        limit_train_batches=1000,
+        limit_val_batches=100,
     )
 
     # Train the model
@@ -81,14 +90,14 @@ def run():
 if __name__ == "__main__":
     wandb.init()
 
-    wandb.config.max_seq_len = 128
-    wandb.config.context_length = 4
-    wandb.config.thinking_steps = 8
+    wandb.config.max_seq_len = 17
+    wandb.config.context_length = 16
+    wandb.config.thinking_steps = 2
     wandb.config.think_twice = False
-    wandb.config.embed_dim = 128
+    wandb.config.embed_dim = 512
     wandb.config.num_heads = 64
     wandb.config.num_layers = 16
     wandb.config.hidden_dim = 512
-    wandb.config.max_time_hours = 15
+    wandb.config.max_time_hours = 5
 
     run()
