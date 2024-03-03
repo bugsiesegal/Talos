@@ -2,276 +2,132 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from config import Config
 
-class CognitiveModule(nn.Module):
-    def __init__(self, brain_state_size, num_layers, **kwargs):
-        """
-        Cognitive module. This module is the core of the model and is responsible for the cognitive processes. It takes
-        in a brain state and outputs a new brain state. The brain state is a tensor of shape (batch_size, brain_state_size).
-        The output brain state has the same shape as the input brain state. The number of layers is the number of
-        transformer layers in the transformer decoder. The kwargs are passed to the transformer decoder layer.
-
-        Args:
-            brain_state_size (int): Size of the brain state.
-            num_layers (int): Number of transformer layers.
-            **kwargs: Keyword arguments passed to the transformer decoder layer.
-
-        Attributes:
-            brain_state_size (int): Size of the brain state.
-            transformer_layer (nn.TransformerDecoderLayer): Transformer decoder layer.
-            transformer (nn.TransformerDecoder): Transformer decoder.
-        """
-        super().__init__()
-
-        self.brain_state_size = brain_state_size
-
-        self.transformer_layer = nn.TransformerDecoderLayer(d_model=brain_state_size, **kwargs)
-
-        self.transformer = nn.TransformerDecoder(self.transformer_layer, num_layers=num_layers)
-
-        self.layer_norm = nn.LayerNorm(brain_state_size)
-
-    def forward(self, x):
-        """
-        Forward pass.
-
-        Args:
-            x (torch.Tensor): Brain state of shape (batch_size, brain_state_size).
-        """
-        x = self.transformer(x, torch.zeros_like(x))
-        x = self.layer_norm(x)
-        return x
-
-
-class EmbeddingIntegrationModule(nn.Module):
-    def __init__(self, embedding_size, brain_state_size):
-        """
-        Embedding integration module. This module takes in an embedding and a brain state and outputs a new brain state.
-        The embedding is a tensor of shape (batch_size, embedding_size). The brain state is a tensor of shape
-        (batch_size, brain_state_size). The output brain state has the same shape as the input brain state.
-
-        Args:
-            embedding_size (int): Size of the embedding.
-            brain_state_size (int): Size of the brain state.
-
-        Attributes:
-            embedding_size (int): Size of the embedding.
-            brain_state_size (int): Size of the brain state.
-            linear (nn.Linear): Linear layer.
-        """
-        super().__init__()
-
-        self.embedding_size = embedding_size
-        self.brain_state_size = brain_state_size
-
-        self.linear = nn.Linear(embedding_size, brain_state_size)
-
-    def forward(self, x, y):
-        """
-        Forward pass.
-
-        Args:
-            x (torch.Tensor): Embedding of shape (batch_size, embedding_size).
-            y (torch.Tensor): Brain state of shape (batch_size, brain_state_size).
-
-        Returns:
-            torch.Tensor: Brain state of shape (batch_size, brain_state_size).
-        """
-        x = torch.mean(x, dim=1)
-        x = self.linear(x)
-        x = x + y
-        return x
-
-
-class EmbeddingExtractionModule(nn.Module):
-    def __init__(self, embedding_size, brain_state_size):
-        """
-        Embedding extraction module. This module takes in a brain state and outputs an embedding. The brain state is a
-        tensor of shape (batch_size, brain_state_size). The output embedding has the shape (batch_size, embedding_size).
-
-        Args:
-            embedding_size (int): Size of the embedding.
-            brain_state_size (int): Size of the brain state.
-
-        Attributes:
-            embedding_size (int): Size of the embedding.
-            brain_state_size (int): Size of the brain state.
-            linear (nn.Linear): Linear layer.
-        """
-        super().__init__()
-
-        self.embedding_size = embedding_size
-        self.brain_state_size = brain_state_size
-
-        self.linear = nn.Linear(brain_state_size, embedding_size)
-
-    def forward(self, x):
-        """
-        Forward pass.
-
-        Args:
-            x (torch.Tensor): Brain state of shape (batch_size, brain_state_size).
-
-        Returns:
-            torch.Tensor: Embedding of shape (batch_size, embedding_size).
-        """
-        x = self.linear(x)
-        return x
-
+import lightning as pl
 
 class IntegratedMemoryModel(nn.Module):
-    def __init__(self, embedding_size, brain_state_size, num_layers, thinking_iterations, **kwargs):
+    def __init__(self, config: Config):
         """
-        Integrated memory model. This model is a combination of the embedding extraction module, the embedding
-        integration module and the cognitive module. It takes in an input and outputs an output. The input is a
-        dictionary of tensors. The tensors are the inputs for the input modules. The output is a dictionary of
-        tensors. The tensors are the outputs of the output modules. The input modules are stored in the input_modules
-        dictionary. The output modules are stored in the output_modules dictionary. The brain state is a tensor of
-        shape (batch_size, brain_state_size).
-
-        Args:
-            embedding_size (int): Size of the embedding.
-            brain_state_size (int): Size of the brain state.
-            num_layers (int): Number of transformer layers.
-            thinking_iterations (int): Number of thinking iterations.
-            **kwargs: Keyword arguments passed to the transformer decoder layer.
-        """
-        super().__init__()
-
-        self.embedding_size = embedding_size
-        self.brain_state_size = brain_state_size
-        self.thinking_iterations = thinking_iterations
-
-        self.embedding_extraction_module = EmbeddingExtractionModule(embedding_size, brain_state_size)
-        self.embedding_integration_module = EmbeddingIntegrationModule(embedding_size, brain_state_size)
-        self.cognitive_module = CognitiveModule(brain_state_size, num_layers, **kwargs)
-
-        self.input_modules = nn.ModuleDict()
-        self.output_modules = nn.ModuleDict()
-
-        self.brain_state = None
-
-    def add_input_module(self, name, module):
-        """
-        Adds an input module.
-
-        Args:
-            name (str): Name of the input module.
-            module (nn.Module): Input module.
+        Model Structure
+        ----------------
+        - Embedding Layer : nn.Embedding
+        - Positional Embedding : nn.Embedding
+        - Transformer Preprocessor : nn.TransformerEncoder
+        - Memory Updater : nn.Linear
+        - Transformer Core : nn.TransformerEncoder
+        - Memory Splitter : nn.Linear
+        - Transformer Postprocessor : nn.TransformerEncoder
+        - Output Layer : nn.Linear
         """
 
-        self.input_modules[name] = module
+        super(IntegratedMemoryModel, self).__init__()
+        self.config = config
+        self.embedding = nn.Embedding(config.vocab_size, config.embedding_dim)
+        self.positional_embedding = nn.Embedding(config.max_length, config.embedding_dim)
+        self.transformer_preprocessor = nn.TransformerEncoder(nn.TransformerEncoderLayer(
+            d_model=config.embedding_dim,
+            nhead=config.nhead,
+            dim_feedforward=config.dim_feedforward,
+            dropout=config.dropout,
+        ), num_layers=config.preprocessor_layers)
+        self.transformer_core = nn.TransformerEncoder(nn.TransformerEncoderLayer(
+            d_model=config.embedding_dim,
+            nhead=config.nhead,
+            dim_feedforward=config.dim_feedforward,
+            dropout=config.dropout,
+        ), num_layers=config.core_layers)
+        self.transformer_postprocessor = nn.TransformerEncoder(nn.TransformerEncoderLayer(
+            d_model=config.embedding_dim,
+            nhead=config.nhead,
+            dim_feedforward=config.dim_feedforward,
+            dropout=config.dropout,
+        ), num_layers=config.postprocessor_layers)
+        self.output_layer = nn.Linear(config.embedding_dim, config.vocab_size)
 
-    def add_output_module(self, name, module):
-        """
-        Adds an output module.
+        self.memory_updater = nn.Linear(config.embedding_dim * 2, config.embedding_dim)
+        self.memory_splitter = nn.Linear(config.embedding_dim, config.embedding_dim * 2)
 
-        Args:
-            name (str): Name of the output module.
-            module (nn.Module): Output module.
-        """
+        self.memory = None
 
-        self.output_modules[name] = module
+        self.thinking_steps = config.thinking_steps
 
-    def init_brain_state(self, batch_size: int) -> None:
-        """
-        Initializes the brain state.
+    def forward(self, x):
+        if self.memory is None or self.memory.size(0) != x.size(0):
+            self.memory = torch.zeros(x.size(0), x.size(1), self.config.embedding_dim, device=x.device)
 
-        Args:
-            batch_size (int): Batch size.
-        """
+        x = self.embedding(x) + self.positional_embedding(torch.arange(x.size(1), device=x.device))
+        x = self.transformer_preprocessor(x)
+        x = self.memory_updater(torch.cat([x, self.memory], dim=-1))
+        for i in range(self.thinking_steps):
+            x = self.transformer_core(x)
+        self.memory, x = torch.chunk(self.memory_splitter(x), 2, dim=-1)
+        x = self.transformer_postprocessor(x)
+        return self.output_layer(x)
 
-        self.brain_state = torch.zeros(batch_size, self.brain_state_size, device=self.device)
+    def reset_memory(self):
+        self.memory = None
 
-    def reset_brain_state(self) -> None:
-        """
-        Resets the brain state.
-        """
 
-        self.brain_state = None
+class LightningIntegratedMemoryModel(pl.LightningModule):
+    def __init__(self, config: Config):
+        super(LightningIntegratedMemoryModel, self).__init__()
+        self.model = IntegratedMemoryModel(config)
+        self.config = config
+        self.learning_rate = config.learning_rate
 
-    def to(self, *args, **kwargs) -> "IntegratedMemoryModel":
-        """
-        Moves the model to the specified device and changes the data type if dtype is specified.
-        This method is compatible with PyTorch's nn.Module to() method.
+        self.save_hyperparameters()
 
-        Args:
-            *args: Variable length argument list for device and/or dtype.
-            **kwargs: Arbitrary keyword arguments for device and/or dtype.
+    def forward(self, x):
+        return self.model(x)
 
-        Returns:
-            IntegratedMemoryModel: The model itself.
-        """
+    def _shared_step(self, batch, batch_idx, prefix):
+        self.model.reset_memory()
+        loss = 0
+        unfolded_batch = torch.stack(batch['input_ids']).T.unfold(1, self.config.context_window + 1, 1)
+        for i in range(unfolded_batch.size(1)):
+            x = unfolded_batch[:, i, :-1]
+            y = unfolded_batch[:, i, -1]
+            y_hat = self.model(x)[..., -1, :]
+            loss += F.cross_entropy(y_hat.view(-1, self.config.vocab_size), y.view(-1))
+        loss /= unfolded_batch.size(1)
+        self.log(f'{prefix}_loss', loss)
+        self.log(f'{prefix}_ppl', torch.exp(loss))
+        return loss
 
-        super().to(*args, **kwargs)
+    def training_step(self, batch, batch_idx):
+        loss = self._shared_step(batch, batch_idx, 'train')
+        return loss
 
-        device, dtype = None, None
+    def validation_step(self, batch, batch_idx):
+        loss = self._shared_step(batch, batch_idx, 'val')
+        return loss
 
-        # Handling args and kwargs to extract device and dtype
-        if len(args) > 0:
-            if isinstance(args[0], torch.device):
-                device = args[0]
-            elif isinstance(args[0], torch.dtype):
-                dtype = args[0]
+    def test_step(self, batch, batch_idx):
+        loss = self._shared_step(batch, batch_idx, 'test')
+        return loss
 
-        device = kwargs.get("device", device)
-        dtype = kwargs.get("dtype", dtype)
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        return {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer,
+                    mode='min',
+                    factor=self.config.lr_scheduler_factor,
+                    patience=self.config.lr_scheduler_patience,
+                    min_lr=self.config.min_lr,
+                    verbose=True
+                ),
+                'interval': 'step',
+                'monitor': 'train_loss',
+            },
+        }
 
-        # Apply to() to all sub-modules with appropriate device and dtype
-        for module in self.input_modules.values():
-            if device and dtype:
-                module.to(device, dtype)
-            elif device:
-                module.to(device)
-            elif dtype:
-                module.to(dtype=dtype)
 
-        for module in self.output_modules.values():
-            if device and dtype:
-                module.to(device, dtype)
-            elif device:
-                module.to(device)
-            elif dtype:
-                module.to(dtype=dtype)
 
-        self.embedding_extraction_module.to(*args, **kwargs)
-        self.embedding_integration_module.to(*args, **kwargs)
-        self.cognitive_module.to(*args, **kwargs)
 
-        if self.brain_state is not None:
-            if device and dtype:
-                self.brain_state = self.brain_state.to(device, dtype)
-            elif device:
-                self.brain_state = self.brain_state.to(device)
-            elif dtype:
-                self.brain_state = self.brain_state.to(dtype=dtype)
 
-        return self
 
-    def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """
-        Forward pass.
 
-        Args:
-            x (dict): Input dictionary.
-
-        Returns:
-            dict: Output dictionary.
-        """
-
-        # Loop over input modules and pass the inputs through them to get the embeddings
-        # Then integrate the embeddings into the brain state
-        for name, module in self.input_modules.items():
-            embedding = module(x[name])
-            self.brain_state = self.embedding_integration_module(embedding, self.brain_state)
-
-        # Pass the brain state through the cognitive module thinking_iterations times
-        for _ in range(self.thinking_iterations):
-            self.brain_state = self.cognitive_module(self.brain_state)
-
-        # Loop over output modules and pass the brain state through them to get the outputs
-        outputs = {}
-        for name, module in self.output_modules.items():
-            outputs[name] = module(self.embedding_extraction_module(self.brain_state))
-
-        return outputs
